@@ -1,4 +1,5 @@
 # ComicLib
+![UI Screenshot](https://github.com/eltwor/ComicLib/blob/main/ComicLib-UI.png)
 
 A local-first, typed Node.js + React application built on top of the [ComicVine](https://comicvine.gamespot.com/) API. It started as a single function that answered one question, *which issues contain these two characters together?*, and grew into a browsable catalogue, a reading tracker and a derived search system, all stored as plain JSON.
 
