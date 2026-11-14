@@ -89,6 +89,7 @@ export type CharacterMatch = CharacterResultRef & {
   deck: string;
   detailCached: boolean;
   issueCount: number;
+  readCount: number;
 };
 
 export type CharacterDetail = CharacterResultRef & {
@@ -99,6 +100,8 @@ export type CharacterDetail = CharacterResultRef & {
   globalAppearances: number;
   siteUrl: string;
   issueCount: number;
+  readCount: number;
+
 };
 
 export type CharacterSearchResponse = {

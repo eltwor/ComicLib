@@ -61,6 +61,7 @@ import {
   getCharacterContext,
   groupCharacterIssues,
   matchCharacters,
+  readIssuesOf,
 } from "./character.ts";
 import { serveUi } from "./server-ui.ts";
 import {
@@ -706,9 +707,11 @@ createServer(async (req, res) => {
     if (charMatch) {
       const character = await getCharacter(Number(charMatch[1]));
       const charCtx = await getCharacterContext();
+      const entry = charCtx.index.get(character.id);
       send(res, 200, {
         ...character,
-        issueCount: charCtx.index.get(character.id)?.issueIds.size ?? 0,
+        issueCount: entry?.issueIds.size ?? 0,
+        readCount: entry ? readIssuesOf(entry, charCtx.lib) : 0,
       });
       return;
     }
@@ -743,11 +746,16 @@ createServer(async (req, res) => {
         listCachedCharacters(),
         getCharacterContext(),
       ]);
+      
       const rows = characters
-        .map((character) => ({
-          ...character,
-          issueCount: charCtx.index.get(character.id)?.issueIds.size ?? 0,
-        }))
+        .map((character) => {
+          const entry = charCtx.index.get(character.id);
+          return {
+            ...character,
+            issueCount: entry?.issueIds.size ?? 0,
+            readCount: entry ? readIssuesOf(entry, charCtx.lib) : 0,
+          };
+        })
         .sort(
           (a, b) => b.issueCount - a.issueCount || a.name.localeCompare(b.name),
         );

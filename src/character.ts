@@ -55,6 +55,7 @@ export type CharacterMatch = CharacterResultRef & {
   deck: string;
   detailCached: boolean;
   issueCount: number;
+  readCount: number;
 };
 
 export type CharacterContext = {
@@ -85,12 +86,12 @@ const imageUrl = (image: any): string => {
 
 // Pure: issue credits in, id -> character + issueIds out.
 export const buildCharacterIndex = (
-  details: { id: number; detail: any }[],
+  details: { issueId: number; detail: any }[],
   validIssueIds: Set<number>,
 ): CharacterIndex => {
   const index: CharacterIndex = new Map();
 
-  for (const { id: issueId, detail } of details) {
+  for (const { issueId: issueId, detail } of details) {
     if (!validIssueIds.has(issueId)) continue;
 
     for (const credit of detail.character_credits ?? []) {
@@ -119,10 +120,10 @@ export const buildCharacterIndex = (
 // issue credits are not in the index; the browse grid reads the cache directly.
 export const enrichCharacterIndex = (
   index: CharacterIndex,
-  details: { id: number; detail: any }[],
+  details: { characterId: number; detail: any }[],
 ): CharacterIndex => {
-  for (const { id, detail } of details) {
-    const entry = index.get(id);
+  for (const { characterId, detail } of details) {
+    const entry = index.get(characterId);
     if (!entry) continue;
 
     entry.aliases = splitAliases(detail.aliases);
@@ -134,6 +135,14 @@ export const enrichCharacterIndex = (
 
   return index;
 };
+
+export const readIssuesOf = (entry: CharacterEntry, lib: Library): number => {
+  let readCount = 0;
+  for( const issueId of entry.issueIds) {
+    if(lib.issues[issueId] !== undefined) readCount++;
+  }
+  return readCount;
+}
 
 const matchesCharacter = (entry: CharacterEntry, query: string) => {
   const needle = query.trim().toLowerCase();
@@ -164,6 +173,7 @@ export const matchCharacters = (
       deck: entry.deck,
       detailCached: entry.detailCached,
       issueCount: entry.issueIds.size,
+      readCount: readIssuesOf(entry, ctx.lib),
     }))
     .sort((a, b) => b.issueCount - a.issueCount || a.name.localeCompare(b.name))
     .slice(0, limit);

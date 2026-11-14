@@ -71,8 +71,7 @@ export function CharacterPage() {
 
           <div className="mt-4 flex flex-wrap gap-2 text-sm">
             <span className="rounded-md bg-surface px-3 py-1.5 font-mono tabular-nums text-body">
-              {character.issueCount} pulled issue
-              {character.issueCount === 1 ? "" : "s"}
+              {character.readCount} read · {character.issueCount} pulled
             </span>
             <span className="rounded-md bg-surface px-3 py-1.5 font-mono tabular-nums text-muted">
               {character.globalAppearances.toLocaleString()} appearances overall

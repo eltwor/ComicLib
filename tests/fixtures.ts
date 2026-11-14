@@ -110,25 +110,3 @@ export const seedIssues: Issue[] = [
     name: "",
   },
 ];
-
-export function findIssues(
-  issues: Issue[],
-  characters: string[],
-  tag?: string,
-): Issue[] {
-  return issues.filter(
-    (issue) =>
-      characters.every((name) =>
-        issue.characters.some((character) => character.name === name),
-      ) && (!tag || issue.tags.includes(tag)),
-  );
-}
-
-export function publishedYear(datePublished: string): number {
-  return Number(datePublished.slice(0, 4));
-}
-
-export function makeLabel(volume: Volume, issue: Issue): string {
-  return `${volume.name} #${issue.issueNumber}`;
-}
-  

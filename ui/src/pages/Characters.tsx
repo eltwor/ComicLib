@@ -22,6 +22,7 @@ const toMatch = (character: CharacterDetail): CharacterMatch => ({
   deck: character.deck,
   detailCached: true,
   issueCount: character.issueCount,
+  readCount: character.readCount
 });
 
 export function Characters() {
@@ -241,7 +242,7 @@ export function Characters() {
                         </p>
                       )}
                       <p className="mt-0.5 font-mono text-[clamp(0.75rem,3cqw,0.95rem)] tabular-nums text-white/55">
-                        {character.issueCount} pulled issue
+                        {character.readCount} read · {character.issueCount} pulled issue
                         {character.issueCount === 1 ? "" : "s"}
                       </p>
                     </div>

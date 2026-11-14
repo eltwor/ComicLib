@@ -78,13 +78,13 @@ export type SearchContext = {
 
 // Pure: raw details in, index out. No filesystem.
 export const buildCreatorIndex = (
-  details: { id: number; detail: any }[],
+  details: { issueId: number; detail: any }[],
   validIssueIds: Set<number>,
 ): CreatorIndex => {
   const index: CreatorIndex = new Map();
 
-  for (const { id, detail } of details) {
-    if (!validIssueIds.has(id)) continue;
+  for (const { issueId, detail } of details) {
+    if (!validIssueIds.has(issueId)) continue;
 
     for (const person of detail.person_credits ?? []) {
       if (!person?.id || !person?.name) continue;
@@ -99,9 +99,9 @@ export const buildCreatorIndex = (
       const roles = rolesOf(person);
       for (const role of roles) entry.roles.add(role);
 
-      const issueRoles = entry.issues.get(id) ?? new Set<string>();
+      const issueRoles = entry.issues.get(issueId) ?? new Set<string>();
       for (const role of roles) issueRoles.add(role);
-      entry.issues.set(id, issueRoles);
+      entry.issues.set(issueId, issueRoles);
 
       index.set(person.id, entry);
     }
@@ -125,7 +125,7 @@ export const getSearchContext = async (): Promise<SearchContext> => {
   const index = buildCreatorIndex(details, new Set(summariesById.keys()));
 
   const indexedIssueIds = new Set(
-    details.filter((d) => summariesById.has(d.id)).map((d) => d.id),
+    details.filter((d) => summariesById.has(d.issueId)).map((d) => d.issueId),
   );
 
   const coverage: Coverage = {
