@@ -179,13 +179,16 @@ export type IndexJobStatus = {
 export type MonthlyHistoryIssue = {
   id: number;
   issueNumber: number;
+  volumeId: number;
+  volumeName: string;
   readAt: string;
 };
 
 export type MonthlyHistoryRow = {
   month: string; // YYYY-MM
   total: number;
-  volumes: {
+  groups: {
+    kind: "volume" | "edition",
     id: number;
     name: string;
     coverImage: string;
@@ -193,3 +196,33 @@ export type MonthlyHistoryRow = {
     issues: MonthlyHistoryIssue[];
   }[];
 };
+
+export type EditionFormat =
+  | "single" | "trade" | "hc" | "compact" | "omnibus" | "compendium";
+
+  export type EditionIssue = {
+  id: number;
+  volumeId: number | null;
+  volumeName: string | null;
+  issueNumber: number | null;
+  datePublished: string | null;
+  readAt: string | null;
+  coverImage: string | null;
+};
+
+  export type EditionRow = {
+  id: number;
+  name: string;
+  format: EditionFormat;
+  owned: boolean;
+  read: number;
+  total: number;
+  coverImage: string;
+};
+
+export type EditionDraft = Pick<EditionRow, "name" | "format" | "owned">;
+
+export type EditionDetail = EditionRow & {
+  issues: EditionIssue[];
+  coverId: number | null,
+}

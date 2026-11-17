@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { IssuePills, type IssuePill } from "../Issue/IssuePills";
-import { VolumeCover } from "./VolumeCover";
+import { VolumeCover } from "../UI/VolumeCover";
 
 export type VolumeSummary = {
   volumeId: number;

@@ -16,17 +16,29 @@ export type Library = {
   volumes: Record<string, VolumeEntry>;
   issues: Record<string, IssueEntry>;
   favourites: Favourites;
+  editions: Record<number, Edition>
 };
 type Favourites = {volumes: number[], creators: number[]}
-
 
 export type VolumeDates = {
   firstReadAt: string | null;
   lastReadAt: string | null;
 };
 
+export type EditionFormat =
+  | "single" | "trade" | "hc" | "compact" | "omnibus" | "compendium";
+
+export type Edition = {
+  id: number;
+  name: string;
+  format: EditionFormat;
+  issues: number[];
+  owned: boolean;
+  coverId?: number;
+};
+
 // ─── pure core: takes the object, touches nothing ───
-export const emptyLibrary = (): Library => ({ volumes: {}, issues: {}, favourites: {volumes: [], creators: []} });
+export const emptyLibrary = (): Library => ({ volumes: {}, issues: {}, favourites: {volumes: [], creators: []}, editions: {}});
 export const isISODate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 export const localToday = (d = new Date()) =>
@@ -207,12 +219,15 @@ export const latestIssueDateByVolume = (
   return byVolume;
 };
 
-export type MonthIssue = { id: number; issueNumber: number; readAt: string };
-export type MonthReads = Map<string, Map<number, MonthIssue[]>>;
+export type MonthIssue = { id: number; issueNumber: number;  volumeId: number; readAt: string };
+export type MonthGroupKind = "volume" | "edition";
+export type MonthGroup = { kind: MonthGroupKind; id: number; issues: MonthIssue[] };
+export type MonthReads = Map<string, Map<string, MonthGroup>>;   // month -> "kind:id" -> group
 
 export const readsByMonth = (
   lib: Library,
   summaries: { id: number; volumeId: number; issueNumber: number }[],
+  editionOf?: (issueId: number) => Edition | undefined
 ): MonthReads => {
   const byMonth: MonthReads = new Map();
 
@@ -221,16 +236,134 @@ export const readsByMonth = (
     if (!date) continue;
 
     const month = date.slice(0, 7);
-    const volumes = byMonth.get(month) ?? new Map<number, MonthIssue[]>();
-    const issues = volumes.get(s.volumeId) ?? [];
-    issues.push({ id: s.id, issueNumber: s.issueNumber, readAt: date });
-    volumes.set(s.volumeId, issues);
-    byMonth.set(month, volumes);
+    const groups = byMonth.get(month) ?? new Map<string, MonthGroup>();
+
+    const edition = editionOf?.(s.id);
+    const target: { kind: MonthGroupKind; id: number } = edition
+      ? { kind: "edition", id: edition.id }
+      : { kind: "volume", id: s.volumeId };
+
+    const key = `${target.kind}:${target.id}`;
+    const issue = {
+      id: s.id,
+      issueNumber: s.issueNumber,
+      volumeId: s.volumeId,
+      readAt: date,
+    };
+
+    const group = groups.get(key);
+    if (group) group.issues.push(issue);
+    else groups.set(key, { kind: target.kind, id: target.id, issues: [issue] });
+
+    byMonth.set(month, groups);
   }
 
   return byMonth;
 };
+// ────── editions helpers ──────
+export const bestEdition = (candidates: Edition[]): Edition | undefined => {
+  let best: Edition | undefined;
 
+  for (const edition of candidates) {
+    if (!best) {
+      best = edition;
+      continue;
+    }
+    if (edition.issues.length !== best.issues.length) {
+      if (edition.issues.length < best.issues.length) best = edition;
+      continue;
+    }
+    if (edition.name !== best.name) {
+      if (edition.name < best.name) best = edition;
+      continue;
+    }
+    if (edition.id < best.id) best = edition;
+  }
+
+  return best;
+};
+
+
+export const editionsByIssue = (lib: Library): Map<number, Edition[]> => {
+  const listEditions = new Map<number, Edition[]>;
+
+  for (const edition of Object.values(lib.editions)) {
+    for (const issueId of edition.issues) {
+      const editions = listEditions.get(issueId) ?? [];
+      editions.push(edition);
+      listEditions.set(issueId, editions);
+    }
+  }
+
+  for (const [issueId, editions] of listEditions) {
+    listEditions.set(issueId, editions.sort((a, b) => a.id - b.id));
+  }
+  return listEditions;
+};
+
+export const editionForIssue = (lib: Library, issueId: number): Edition | undefined => {
+  return bestEdition(editionsByIssue(lib).get(issueId) ?? [])
+}
+export const editionProgress = (lib: Library, edition: Edition) => {
+  const total = edition.issues.length;
+  let read = 0;
+  for(const i of edition.issues) {
+    if(lib.issues[i] !== undefined) read+= 1;
+  }
+  return {read,total};
+}
+
+export const editionCoverId = (edition: Edition): number | undefined => {
+  if(edition.coverId && edition.issues.includes(edition.coverId)) return edition.coverId;
+  return edition.issues[0];
+}
+// ────── editions writers ──────
+
+type NewEditionInput = Omit<Edition, 'id'>;
+
+export const createEdition = (lib:Library, {name,format,issues,owned}: NewEditionInput)  : Edition => {
+  const existingIds = Object.keys(lib.editions).map(Number);
+  const nextId = Math.max(0,...existingIds) + 1;
+
+  const newEdition : Edition = {
+    id: nextId,
+    name: name.trim(),
+    format,
+    coverId: undefined,
+    issues: [...new Set(issues)],
+    owned
+  }
+    lib.editions[nextId] = newEdition;
+  return newEdition;
+}
+
+export const updateEdition = (lib:Library, id:number, patch:{name?:string,format?:EditionFormat,owned?:boolean, coverId?: number | null}) : Edition | undefined => {
+  const oldEdition = lib.editions[id];
+  if (!oldEdition) return undefined;
+
+  const updatedEdition : Edition = {
+    ...oldEdition,
+    name: patch.name?.trim() || oldEdition.name,
+    format: patch.format || oldEdition.format,
+    owned: patch.owned ?? oldEdition.owned,
+    coverId: patch.coverId === undefined ? oldEdition.coverId : (patch.coverId ?? undefined)
+  };
+  lib.editions[id] = updatedEdition;
+  return updatedEdition;
+}
+
+export const applyEditionIssues = (lib:Library,id:number,add:number[],remove:number[]) => {
+ const edition = lib.editions[id];
+ if (!edition) return;
+
+ return edition.issues = [...new Set([...edition.issues, ...add])]
+   .filter(issueId => !remove.includes(issueId));
+}
+
+export const deleteEdition = (lib:Library, id:number) => {
+  if(!lib.editions[id]) return false;
+  return delete lib.editions[id];
+}
 
 // ─── thin I/O shell ───
 export const readLibrary = (): Library => {
@@ -245,6 +378,7 @@ export const readLibrary = (): Library => {
       volumes: [...new Set<number>(raw.favourites?.volumes ?? [])],
       creators: [...new Set<number>(raw.favourites?.creators ?? [])],
     },
+    editions: raw.editions ?? {}
   };
 }
 

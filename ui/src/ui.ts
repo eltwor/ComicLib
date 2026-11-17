@@ -12,3 +12,5 @@ export const formatShortDate = (iso: string | null | undefined): string => {
   if (!month || !day) return iso;
   return `${day} ${MONTHS[month - 1]}`;
 };
+
+export const progressWidth = (read: number, total: number) => `${total ? Math.round((read / total) * 100) : 0}%`

@@ -361,7 +361,6 @@ describe("groupCharacterIssues", () => {
   });
 
   it("includes unread issues and sets readAt to null", () => {
-    // TODO: lib with issue 10 read ("2026-01-05") and 11 unread.
     // Expect the 10 row's readAt to be the date and 11's to be null.
     const lib = emptyLibrary();
     lib.issues[10] = { readAt: "2026-01-05" };
@@ -383,7 +382,6 @@ describe("groupCharacterIssues", () => {
   });
 
   it("sorts issues by number and volumes by name", () => {
-    // TODO: issues pushed out of order; two volumes "Zeta" and "Alpha".
     // Expect issue numbers ascending within a group and Alpha before Zeta.
     const ctx = makeContext({
       index: new Map([[1, makeEntry(1, "Nightwing", [10, 11, 12, 13])]]),
@@ -407,7 +405,6 @@ describe("groupCharacterIssues", () => {
   });
 
   it("ignores unknown character ids", () => {
-    // TODO: groupCharacterIssues(ctx, new Set([99])) on a context without 99.
     // Expect volumes [] and characters [].
     const ctx = makeContext({
       index: new Map([[1, makeEntry(1, "Nightwing", [10, 11])]]),

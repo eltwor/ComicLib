@@ -50,6 +50,16 @@ import {
   latestIssueDateByVolume,
   nextReleaseOf,
   volumeTagsOf,
+  type Edition,
+  editionProgress,
+  createEdition,
+  deleteEdition,
+  applyEditionIssues,
+  updateEdition,
+  type EditionFormat,
+  editionsByIssue,
+  bestEdition,
+  editionCoverId,
 } from "./library.ts";
 import { advanceRelease, resolveNextRelease } from "./release.ts";
 import {
@@ -71,6 +81,7 @@ import {
 } from "./index-job.ts";
 import { getVolumeYaml } from "./vault.ts";
 import { isValidSession, readCookie, signSession } from "./session.ts";
+import { buildHistoryCsv, type HistoryCsvRow } from "./export.ts";
 
 const PORT = Number(process.env.PORT) || 3001;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -84,21 +95,137 @@ const MAX_AGE = 90 * 24 * 60 * 60;
 const isAuthorized = (req: IncomingMessage, res: ServerResponse): boolean => {
   if (!APP_PASSWORD) return true;
   const cookie = readCookie(req.headers.cookie, "comiclib_session");
-  if(isValidSession(cookie, APP_PASSWORD, Date.now())) return true;
+  if (isValidSession(cookie, APP_PASSWORD, Date.now())) return true;
   if (!req.headers.authorization?.startsWith("Basic ")) return false;
-  const decoded = Buffer.from(req.headers.authorization.slice(6), "base64").toString("utf8");
+  const decoded = Buffer.from(
+    req.headers.authorization.slice(6),
+    "base64",
+  ).toString("utf8");
   const given = Buffer.from(decoded.slice(decoded.indexOf(":") + 1));
   const expected = Buffer.from(APP_PASSWORD);
-  const ok = given.length === expected.length && timingSafeEqual(given, expected);
-if (!ok) return false;
-const token = signSession(APP_PASSWORD, Date.now() + MAX_AGE * 1000);
-res.setHeader("Set-Cookie", `comiclib_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${MAX_AGE}`);
-return true;
-
+  const ok =
+    given.length === expected.length && timingSafeEqual(given, expected);
+  if (!ok) return false;
+  const token = signSession(APP_PASSWORD, Date.now() + MAX_AGE * 1000);
+  res.setHeader(
+    "Set-Cookie",
+    `comiclib_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${MAX_AGE}`,
+  );
+  return true;
 };
 
-
 // ───────────── Helper functions ─────────────
+const EDITION_FORMATS = [
+  "single",
+  "trade",
+  "hc",
+  "compact",
+  "omnibus",
+  "compendium",
+] as const satisfies readonly EditionFormat[];
+
+// Returns a clean value, or a string error message for the route to 400 with.
+const parseEditionBody = (
+  body: any,
+  requireName: boolean,
+):
+  | {
+      name?: string;
+      format?: EditionFormat;
+      owned?: boolean;
+      coverId?: number | undefined;
+    }
+  | string => {
+  if (!body || typeof body !== "object") {
+    return "Request body must be a JSON object";
+  }
+
+  const result: {
+    name?: string;
+    format?: EditionFormat;
+    owned?: boolean;
+    coverId?: number | undefined;
+  } = {};
+
+  // name — if present it must be a string; trim it; if requireName, reject empty
+  if (body.name !== undefined) {
+    if (typeof body.name !== "string") {
+      return "Name must be a string";
+    }
+    const trimmed = body.name.trim();
+    if (requireName && trimmed === "") {
+      return "Name cannot be empty";
+    }
+    result.name = trimmed;
+  } else if (requireName) {
+    return "Name is required";
+  }
+
+  // format — if present it must be in EDITION_FORMATS; if requireName (create), default to "trade"
+  if (body.format !== undefined) {
+    if (
+      typeof body.format !== "string" ||
+      !(EDITION_FORMATS as readonly string[]).includes(body.format)
+    )
+      return `Format must be one of: ${EDITION_FORMATS.join(", ")}`;
+    result.format = body.format as EditionFormat;
+  } else if (requireName) {
+    result.format = "trade";
+  }
+  // owned — if present it must be a boolean
+
+  if (body.owned !== undefined) {
+    if (typeof body.owned !== "boolean")
+      return `Owned must be either true or false`;
+    result.owned = body.owned;
+  } else if (requireName) {
+    result.owned = false;
+  }
+
+  // coverId must be postiive integer
+  if (body.coverId != null) {
+    if (
+      typeof body.coverId !== "number" ||
+      !Number.isInteger(body.coverId) ||
+      body.coverId <= 0
+    )
+      return "CoverId must be a positive integer";
+    result.coverId = body.coverId;
+  }
+
+  return result;
+};
+
+const parseBulkIssuesBody = (
+  body: any,
+): { add: number[]; remove: number[] } | string => {
+  if (!body || typeof body !== "object") {
+    return "Request body must be a JSON object";
+  }
+
+  let add: number[] = [];
+  if (body.add !== undefined) {
+    if (!Array.isArray(body.add)) {
+      return "'add' must be an array";
+    }
+    add = body.add
+      .map(Number)
+      .filter((n: number) => Number.isInteger(n) && n > 0);
+  }
+
+  let remove: number[] = [];
+  if (body.remove !== undefined) {
+    if (!Array.isArray(body.remove)) {
+      return "'remove' must be an array";
+    }
+    remove = body.remove
+      .map(Number)
+      .filter((n: number) => Number.isInteger(n) && n > 0);
+  }
+
+  return { add, remove };
+};
+
 const parseRole = (value: string | null): IssueFilter["role"] =>
   value === "writer" || value === "artist" || value === "cover" ? value : "all";
 
@@ -134,8 +261,7 @@ createServer(async (req, res) => {
   try {
     if (!isAuthorized(req, res)) {
       res.writeHead(401, {
-        "WWW-Authenticate":
-          'Basic realm="ComicLib", charset="UTF-8"',
+        "WWW-Authenticate": 'Basic realm="ComicLib", charset="UTF-8"',
         "Content-Type": "text/plain; charset=utf-8",
       });
       res.end("Authentication required");
@@ -339,22 +465,54 @@ createServer(async (req, res) => {
       const summaries = await listCachedSummaries();
       const volumes = await listCachedVolumes();
       const volumeById = new Map(volumes.map((v) => [v.id, v]));
-      const byMonth = readsByMonth(lib, summaries);
+
+      const byIssue = editionsByIssue(lib);
+      const editionOf = (id: number) => bestEdition(byIssue.get(id) ?? []);
+      const byMonth = readsByMonth(lib, summaries, editionOf);
+      const summariesById = new Map(summaries.map((s) => [s.id, s]));
 
       const rows = [...byMonth.entries()]
         .sort(([a], [b]) => b.localeCompare(a))
         .map(([month, counts]) => {
-          const items = [...counts.entries()]
-            .map(([id, issues]) => {
-              const volume = volumeById.get(id);
+          const items = [...counts.values()]
+            .map((group) => {
+              const isEdition = group.kind === "edition";
+              const volume = isEdition ? undefined : volumeById.get(group.id);
+              const cover =
+                group.issues
+                  .map((issue) => summariesById.get(issue.id)?.coverImage)
+                  .find((c) => c) ?? "";
+
+              const issues = group.issues
+                .map((issue) => ({
+                  ...issue,
+                  volumeName:
+                    volumeById.get(issue.volumeId)?.name ??
+                    `Volume ${issue.volumeId}`,
+                }))
+                .sort(
+                  (a, b) =>
+                    a.volumeName.localeCompare(b.volumeName) ||
+                    a.volumeId - b.volumeId ||
+                    a.issueNumber - b.issueNumber,
+                );
+
+              const edition = isEdition ? lib.editions[group.id] : undefined;
+              const chosenCover = edition
+                ? summariesById.get(editionCoverId(edition) ?? -1)?.coverImage
+                : "";
+
               return {
-                id,
-                name: volume?.name ?? `Volume ${id}`,
-                coverImage: volume?.coverImage ?? "",
-                count: issues.length,
-                issues: [...issues].sort(
-                  (a, b) => a.issueNumber - b.issueNumber,
-                ),
+                id: group.id,
+                kind: group.kind,
+                name: isEdition
+                  ? (lib.editions[group.id]?.name ?? `Edition ${group.id}`)
+                  : (volume?.name ?? `Volume ${group.id}`),
+                coverImage: isEdition
+                  ? (chosenCover || cover)
+                  : (volume?.coverImage ?? ""),
+                count: group.issues.length,
+                issues,
               };
             })
             .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
@@ -362,11 +520,45 @@ createServer(async (req, res) => {
           return {
             month,
             total: items.reduce((sum, v) => sum + v.count, 0),
-            volumes: items,
+            groups: items,
           };
         });
 
       send(res, 200, rows);
+      return;
+    }
+
+    if (url.pathname === "/api/history/export.csv" && req.method === "GET") {
+      const lib = readLibrary();
+      const summaries = await listCachedSummaries();
+      const volumes = await listCachedVolumes();
+      const volumeById = new Map(volumes.map((v) => [v.id, v]));
+      const summariesById = new Map(summaries.map((s) => [s.id, s]));
+      const byMonth = readsByMonth(lib, summaries);
+
+      const rows: HistoryCsvRow[] = [...byMonth.entries()].flatMap(
+        ([month, counts]) =>
+          [...counts.values()].flatMap((group) => {
+            return group.issues.map((issue) => ({
+              month,
+              volume:
+                volumeById.get(issue.volumeId)?.name ??
+                `Volume ${issue.volumeId}`,
+              issue: issue.issueNumber,
+              releaseDate: summariesById.get(issue.id)?.datePublished ?? "",
+              readAt: issue.readAt,
+            }));
+          }),
+      );
+
+      const csv = buildHistoryCsv(rows);
+
+      res.writeHead(200, {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="comiclib-history.csv"',
+        "Cache-Control": "no-store",
+      });
+      res.end(csv);
       return;
     }
 
@@ -589,7 +781,9 @@ createServer(async (req, res) => {
         const lib = updateLibrary((lib) =>
           applyNextReleaseVol(lib, volumeId, next),
         );
-        send(res, 200, { nextReleaseOverride: nextReleaseOf(lib, volumeId) ?? null });
+        send(res, 200, {
+          nextReleaseOverride: nextReleaseOf(lib, volumeId) ?? null,
+        });
         return;
       }
 
@@ -627,6 +821,179 @@ createServer(async (req, res) => {
           : applyVolumeTag(lib, volumeId, remove, false);
       });
       send(res, 200, { tags });
+      return;
+    }
+
+    // Gets a list of all editions
+    if (url.pathname === "/api/editions" && req.method === "GET") {
+      const lib = readLibrary();
+      const editions = lib.editions;
+      const body = [];
+      const summaries = await listCachedSummaries();
+      const summariesById = new Map(summaries.map((s) => [s.id, s]));
+
+      for (const e of Object.values(editions)) {
+        const { read, total } = editionProgress(lib, e);
+        body.push({
+          id: e.id,
+          name: e.name,
+          format: e.format,
+          owned: e.owned,
+          read,
+          total,
+          coverImage:
+            summariesById.get(editionCoverId(e) ?? -1)?.coverImage ?? "",
+        });
+      }
+      send(res, 200, body);
+      return;
+    }
+
+    // Gets a detail for specific edition
+    const editionFetch = url.pathname.match(/^\/api\/editions\/(\d+)$/);
+    if (editionFetch && req.method === "GET") {
+      const lib = readLibrary();
+      const edition = lib.editions[Number(editionFetch[1])];
+      if (!edition) {
+        send(res, 404, { error: "edition not found" });
+        return;
+      }
+
+      const summaries = await listCachedSummaries();
+      const volumes = await listCachedVolumes();
+      const volumeById = new Map(volumes.map((v) => [v.id, v]));
+      const summariesById = new Map(summaries.map((s) => [s.id, s]));
+
+      const issues = edition.issues.map((id) => {
+        const s = summariesById.get(id);
+        return {
+          id,
+          volumeId: s?.volumeId ?? null,
+          volumeName: s
+            ? (volumeById.get(s.volumeId)?.name ?? `Volume ${s.volumeId}`)
+            : null,
+          issueNumber: s?.issueNumber ?? null,
+          datePublished: s?.datePublished ?? null,
+          readAt: readAtOfIss(lib, id) ?? null,
+          coverImage: s?.coverImage ?? null,
+        };
+      });
+
+      issues.sort(
+        (a, b) =>
+          (a.volumeName ?? "\uffff").localeCompare(b.volumeName ?? "\uffff") ||
+          (a.volumeId ?? 0) - (b.volumeId ?? 0) ||
+          (a.issueNumber ?? 0) - (b.issueNumber ?? 0),
+      );
+
+      send(res, 200, {
+        ...edition,
+        ...editionProgress(lib, edition),
+        coverId: editionCoverId(edition) ?? null,
+        coverImage:
+          summariesById.get(editionCoverId(edition) ?? -1)?.coverImage ?? "",
+        issues,
+      });
+      return;
+    }
+
+    // Create Edition
+    if (url.pathname === "/api/editions" && req.method === "POST") {
+      const rawBody = await readJson(req);
+      const parsed = parseEditionBody(rawBody, true);
+
+      // 1. If parseEditionBody returns a string, it's a validation error -> 400
+      if (typeof parsed === "string") {
+        send(res, 400, { error: parsed });
+        return;
+      }
+
+      let created: Edition | undefined;
+      updateLibrary((lib) => {
+        created = createEdition(lib, {
+          name: parsed.name!,
+          format: parsed.format ?? "trade",
+          issues: [],
+          owned: parsed.owned ?? false,
+        });
+      });
+
+      send(res, 200, { created });
+      return;
+    }
+
+    // Update edition
+    const editEditions = url.pathname.match(/^\/api\/editions\/(\d+)$/);
+    if (editEditions && req.method === "POST") {
+      const rawBody = await readJson(req);
+      const parsed = parseEditionBody(rawBody, false);
+
+      // 1. If parseEditionBody returns a string, it's a validation error -> 400
+      if (typeof parsed === "string") {
+        send(res, 400, { error: parsed });
+        return;
+      }
+
+      let updated: Edition | undefined = undefined;
+      updateLibrary((lib) => {
+        updated = updateEdition(lib, Number(editEditions[1]), {
+          name: parsed.name,
+          format: parsed.format,
+          owned: parsed.owned,
+          coverId: parsed.coverId,
+        });
+      });
+      if (!updated) {
+        send(res, 404, { error: "edition not found" });
+        return;
+      }
+
+      send(res, 200, { updated });
+      return;
+    }
+
+    // Add issues in bulk to edition
+    const editionIssuesBulk = url.pathname.match(
+      /^\/api\/editions\/(\d+)\/issues$/,
+    );
+    if (editionIssuesBulk && req.method === "POST") {
+      const rawBody = await readJson(req);
+      const parsed = parseBulkIssuesBody(rawBody);
+
+      if (typeof parsed === "string") {
+        send(res, 400, { error: parsed });
+        return;
+      }
+
+      let updatedIssues;
+
+      updateLibrary((lib) => {
+        updatedIssues = applyEditionIssues(
+          lib,
+          Number(editionIssuesBulk[1]),
+          parsed.add,
+          parsed.remove,
+        );
+      });
+      if (!updatedIssues) {
+        send(res, 404, { error: "edition not found" });
+        return;
+      }
+      send(res, 200, updatedIssues);
+      return;
+    }
+
+    const editionDelete = url.pathname.match(/^\/api\/editions\/(\d+)$/);
+    if (editionDelete && req.method === "DELETE") {
+      let deleted = false;
+      updateLibrary((lib) => {
+        deleted = deleteEdition(lib, Number(editionDelete[1]));
+      });
+      if (!deleted) {
+        send(res, 404, { error: "edition not found" });
+        return;
+      }
+      send(res, 200, { deleted });
       return;
     }
 
@@ -684,15 +1051,16 @@ createServer(async (req, res) => {
     if (jobUrl && req.method === "POST") {
       const result = await startVolumeIndexJob(Number(jobUrl[1]));
       if (!result.started) {
-        if(result.busy) {send(res, 409, {
-          error: "Another index job is running",
-          job: result.job,
-        });}
-        else {
+        if (result.busy) {
+          send(res, 409, {
+            error: "Another index job is running",
+            job: result.job,
+          });
+        } else {
           send(res, 500, {
-          error: result.job.error ?? "Could not start deep fetch",
-          job: result.job,
-        });
+            error: result.job.error ?? "Could not start deep fetch",
+            job: result.job,
+          });
         }
         return;
       }
@@ -746,7 +1114,7 @@ createServer(async (req, res) => {
         listCachedCharacters(),
         getCharacterContext(),
       ]);
-      
+
       const rows = characters
         .map((character) => {
           const entry = charCtx.index.get(character.id);

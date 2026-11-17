@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { MonthlyHistoryRow, VolumeSummary } from "../types";
 import { PageHeader } from "../components/UI/PageHeader";
 import { Link } from "react-router-dom";
 import { StateBadge } from "../components/History/StateBadge";
 import { ViewToggle } from "../components/UI/ViewToggle";
-import { VolumeCover } from "../components/Volume/VolumeCover";
+import { VolumeCover } from "../components/UI/VolumeCover";
+import { buttonClass } from "../ui";
 
 const MONTH_NAMES = [
   "January",
@@ -89,6 +90,11 @@ export function History() {
               ? `${monthlyTotal} issues read across ${monthly.length} months.`
               : "Issues read, grouped by month."
         }
+        actions={
+          <a href="/api/history/export.csv" className={buttonClass}>
+            Export CSV
+          </a>
+        }
       />
 
       <div className="mb-4">
@@ -126,7 +132,7 @@ export function History() {
             <table className="w-full text-left text-sm">
               <thead className="text-[10px] uppercase tracking-[0.09em] text-dim">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Volume</th>
+                  <th className="px-3 py-2 font-medium">Group</th>
                   <th className="px-3 py-2 font-medium">Last read</th>
                   <th className="px-3 py-2 text-right font-medium">Progress</th>
                   <th className="px-3 py-2 text-right font-medium">State</th>
@@ -213,8 +219,8 @@ function MonthSection({
           {formatMonth(row.month)}
         </h2>
         <span className="font-mono text-xs tabular-nums text-dim">
-          {row.total} issues · {row.volumes.length} volume
-          {row.volumes.length === 1 ? "" : "s"}
+          {row.total} issues · {row.groups.length} collections
+          {row.groups.length === 1 ? "" : "s"}
         </span>
         <span
           aria-hidden="true"
@@ -233,13 +239,13 @@ function MonthSection({
           <table className="w-full text-left text-sm">
             <thead className="text-[10px] uppercase tracking-[0.09em] text-dim">
               <tr>
-                <th className="px-3 py-2 font-medium">Volume</th>
+                <th className="px-3 py-2 font-medium">Group</th>
                 <th className="px-3 py-2 text-right font-medium">Issues</th>
               </tr>
             </thead>
             <tbody>
-              {row.volumes.map((volume) => (
-                <MonthVolumeRow key={volume.id} volume={volume} />
+              {row.groups.map((group) => (
+                <MonthGroupRow key={`${group.kind}:${group.id}`} group={group} />
               ))}
             </tbody>
           </table>
@@ -249,10 +255,10 @@ function MonthSection({
   );
 }
 
-function MonthVolumeRow({
-  volume,
+function MonthGroupRow({
+  group,
 }: {
-  volume: MonthlyHistoryRow["volumes"][number];
+  group: MonthlyHistoryRow["groups"][number];
 }) {
   const [open, setOpen] = useState(false);
 
@@ -266,21 +272,23 @@ function MonthVolumeRow({
           <div className="flex items-center gap-3">
             <VolumeCover
               size="sm"
-              src={volume.coverImage}
-              name={volume.name}
+              src={group.coverImage}
+              name={group.name}
             />
             <span className="w-3 text-dim">{open ? "▾" : "▸"}</span>
             <Link
-              to={`/volume/${volume.id}`}
+              to={group.kind === "edition"
+  ? `/editions?edition=${group.id}`
+  : `/volume/${group.id}`}
               onClick={(e) => e.stopPropagation()}
               className="text-body transition-colors hover:underline hover:underline-offset-4"
             >
-              {volume.name}
+              {group.name}
             </Link>
           </div>
         </td>
         <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-muted">
-          {volume.count}
+          {group.count}
         </td>
       </tr>
 
@@ -288,16 +296,28 @@ function MonthVolumeRow({
         <tr className="bg-surface/30">
           <td colSpan={2} className="px-3 pb-3 pt-1">
             <div className="flex flex-wrap gap-1">
-              {volume.issues.map((issue) => (
-                <Link
-                  key={issue.id}
-                  to={`/volume/${volume.id}/issues/${issue.id}`}
-                  title={`Read ${issue.readAt}`}
-                  className="inline-flex h-6 items-center rounded-md bg-accent/15 px-2 font-mono text-xs tabular-nums text-accent-soft transition-colors hover:bg-accent/25"
-                >
-                  #{issue.issueNumber}
-                </Link>
-              ))}
+              {group.issues.map((issue, i) => {
+                const newVolume =
+                  group.kind === "edition" &&
+                  group.issues[i - 1]?.volumeId !== issue.volumeId;
+
+                return (
+                  <Fragment key={issue.id}>
+                    {newVolume && (
+                      <p className="mt-1.5 w-full text-[10px] uppercase tracking-[0.09em] text-dim">
+                        {issue.volumeName}
+                      </p>
+                    )}
+                    <Link
+                      to={`/volume/${issue.volumeId}/issues/${issue.id}`}
+                      title={`Read ${issue.readAt}`}
+                      className="inline-flex h-6 items-center rounded-md bg-accent/15 px-2 font-mono text-xs tabular-nums text-accent-soft transition-colors hover:bg-accent/25"
+                    >
+                      #{issue.issueNumber}
+                    </Link>
+                  </Fragment>
+                );
+              })}
             </div>
           </td>
         </tr>

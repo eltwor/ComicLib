@@ -10,6 +10,7 @@ import { History } from "./pages/History";
 import { Creators } from "./pages/Creators";
 import { Characters } from "./pages/Characters";
 import { CharacterPage } from "./pages/CharacterPage";
+import { Editions } from "./pages/Editions";
 
 const navLink = ({ isActive }: { isActive: boolean }) =>
   "whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition-colors " +
@@ -27,6 +28,7 @@ const LINKS = [
   { to: "/", end: true, label: "Discovery" },
   { to: "/gallery", label: "Gallery" },
   { to: "/shelf", label: "Shelf" },
+  { to: "/editions", label: "Editions" },
   { to: "/history", label: "History" },
   { to: "/creators", label: "Creators" },
   { to: "/characters", label: "Characters" },
@@ -102,6 +104,7 @@ function App() {
           <Route path="/creators" element={<Creators />} />
           <Route path="/characters" element={<Characters />} />
           <Route path="/character/:id" element={<CharacterPage />} />
+          <Route path="/editions" element={<Editions />} />
         </Routes>
       </main>
     </div>
